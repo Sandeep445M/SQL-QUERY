@@ -1,0 +1,31 @@
+Steps :
+	1. Source server:
+	
+	1.Take copy only backup:
+	backup database POWADB004_7may
+	to disk = 'G:\RITM000000358679\POWADB004_7may_full_Copyonly_30052025.BAK' WITH COPY_ONLY, COMPRESSION, stats=5
+	2.COPY THIS BACKUP INTO TARGET SERVER:
+	\\SERVERNAME\G$
+	3.TAKE FULL BACKUP OF TORGET DATABASE 
+	backup database POWADB004
+	to disk = 'G:\RITM000000358679\POWADB004_full_Copyonly_30052025.BAK' WITH COPY_ONLY, COMPRESSION, stats=5
+	(TAKE SCREEN SHOT)
+	4.TAKE USER PERMISSION FOR THAT RUN OUR QUERY
+	TAKE COPY OF OUT PUT AND PASTE SOME WHERE
+	5.RIGHT CLICK ON TARGET DATABASE AND GO TO RESTORE AND SELECT DEVICE AND CHOOSE BACKUP FILE.
+	6.DESTINATION:
+	DATABASE NAME (ENTER THE DATABSE WHICH WE WANT TO RESTORE ).
+
+	
+	
+	
+	
+	
+	7.file path name 
+	
+	
+	
+	
+	
+	Now goto databse security and users --view ---object explorer details---
+	Now we can delete the permissions users and run the copy data(copy some whare). Then permission and users will restore.
