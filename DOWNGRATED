@@ -1,0 +1,1190 @@
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++1. DOWNGRADE
+STEP1: TDE ENABLED SCRIPT
+ 
+SELECT  
+     db.name AS DatabaseName, 
+     db.is_encrypted AS IsEncrypted, 
+     CASE  
+         WHEN db.is_encrypted = 1 THEN 'TDE Enabled' 
+         ELSE 'TDE Not Enabled' 
+     END AS TDEStatus 
+FROM  
+     sys.databases AS db 
+ORDER BY  
+     db.name; 
++++++++++++++++++++++++++++++++++++++++++++++++++STEP_2:PHYSICAL FILES
+ 
+--Script 01: 
+--Enable xp_cmdshell 
+EXEC sp_configure 'show advanced options', 1 
+GO 
+RECONFIGURE 
+GO 
+EXEC sp_configure 'xp_cmdshell', 1 
+GO 
+RECONFIGURE 
+GO 
+  
+--Global variables 
+DECLARE @FolderLocation VARCHAR(8000) 
+SET @FolderLocation  = 'I:\EditionUpgradeBackup' 
+  
+DECLARE @DatabaseName VARCHAR(8000) 
+SET @DatabaseName = '' 
+  
+DECLARE @Sql VARCHAR(8000) 
+SET @Sql = '' 
+  
+--Create backup folder 
+IF((SELECT @@SERVERNAME) LIKE 'AWS%' OR (SELECT @@SERVERNAME) LIKE 'AZR%') 
+  SET @Sql = 'mkdir ' + @FolderLocation 
+  EXEC xp_cmdshell @Sql 
+  
+--Create table with all databases 
+USE master 
+IF(EXISTS(SELECT TOP 1 1 FROM sys.tables WHERE name LIKE 'DatabasesForDowngrade')) 
+  DROP TABLE DatabasesForDowngrade 
+  
+CREATE TABLE DatabasesForDowngrade 
+( 
+  DatabaseName VARCHAR(8000), 
+  Files VARCHAR(8000) DEFAULT NULL, 
+  Stat INT DEFAULT 0 
+) 
+  
+INSERT INTO DatabasesForDowngrade(DatabaseName) 
+SELECT 
+  a.Name 
+FROM sys.databases a 
+WHERE name NOT IN ('Tempdb', 'master') 
+  
+  
+--Loop tru all user databases and MSDB 
+WHILE(EXISTS(SELECT TOP 1 1 FROM DatabasesForDowngrade WHERE Stat = 0)) 
+BEGIN 
+  SET @DatabaseName = (SELECT TOP 1 DatabaseName FROM DatabasesForDowngrade WHERE Stat = 0) 
+  
+  --Save file locations at table 
+  SET @Sql =  
+  'INSERT INTO master.dbo.DatabasesForDowngrade 
+  SELECT 
+    ''' + @DatabaseName + ''', 
+    physical_name, 
+    0 
+  FROM ' + @DatabaseName + '.sys.database_files' 
+ 
+  EXEC (@Sql) 
+  
+  ----Generate full backups 
+  --SET @Sql =  
+  --'BACKUP DATABASE ' + @DatabaseName + ' TO  DISK = N''' + @FolderLocation + '\' + @DatabaseName + '.bak'' 
+  --WITH  COPY_ONLY, NOFORMAT, NOINIT,  NAME = N''' + @DatabaseName + '-Full Database Backup'',  
+  --SKIP, NOREWIND, NOUNLOAD,  STATS = 1' 
+  
+  EXEC (@Sql) 
+  
+  ----Execute detach 
+  --SET @Sql = 
+  --'ALTER DATABASE ' + @DatabaseName + ' SET SINGLE_USER WITH ROLLBACK IMMEDIATE 
+  --EXEC master.dbo.sp_detach_db @dbname = N''' + @DatabaseName + ''', @skipchecks = ''false''' 
+  --IF(@DatabaseName NOT IN ('MSDB', 'TEMPDB', 'master', 'Model')) 
+  --  EXEC (@Sql) 
+  
+  --Update controls 
+  UPDATE DatabasesForDowngrade 
+  SET Stat = 1 
+  WHERE DatabaseName LIKE @DatabaseName 
+  
+  SET @DatabaseName = '' 
+  SET @Sql = '' 
+END 
+  
+  
+--Generate file at the newly created folder with that information 
+SELECT * FROM DatabasesForDowngrade 
+SET @Sql = 'sqlcmd -Q "SELECT LTRIM(RTRIM(DatabaseName + ''|'' + Files)) FROM master.dbo.DatabasesForDowngrade WHERE Files IS NOT NULL" -o ' + @FolderLocation + '\PhysicalFiles.txt' 
+EXEC xp_cmdshell @Sql 
+  
+  
+--Disnable xp_cmdshell 
+EXEC sp_configure 'show advanced options', 1 
+GO 
+RECONFIGURE 
+GO 
+EXEC sp_configure 'xp_cmdshell', 0 
+GO 
+RECONFIGURE 
+GO 
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++STEP 3 : TAKE BACKUPS
+ 
+--Script 01: 
+--Enable xp_cmdshell 
+EXEC sp_configure 'show advanced options', 1 
+GO 
+RECONFIGURE 
+GO 
+EXEC sp_configure 'xp_cmdshell', 1 
+GO 
+RECONFIGURE 
+GO 
+  
+--Global variables 
+DECLARE @FolderLocation VARCHAR(8000) 
+SET @FolderLocation  = 'I:\EditionUpgradeBackup' 
+  
+DECLARE @DatabaseName VARCHAR(8000) 
+SET @DatabaseName = '' 
+  
+DECLARE @Sql VARCHAR(8000) 
+SET @Sql = '' 
+  
+--Create backup folder 
+IF((SELECT @@SERVERNAME) LIKE 'AWS%' OR (SELECT @@SERVERNAME) LIKE 'AZR%') 
+  SET @Sql = 'mkdir ' + @FolderLocation 
+  EXEC xp_cmdshell @Sql 
+  
+--Create table with all databases 
+USE master 
+IF(EXISTS(SELECT TOP 1 1 FROM sys.tables WHERE name LIKE 'DatabasesForDowngrade')) 
+  DROP TABLE DatabasesForDowngrade 
+  
+CREATE TABLE DatabasesForDowngrade 
+( 
+  DatabaseName VARCHAR(8000), 
+  Files VARCHAR(8000) DEFAULT NULL, 
+  Stat INT DEFAULT 0 
+) 
+  
+INSERT INTO DatabasesForDowngrade(DatabaseName) 
+SELECT 
+  a.Name 
+FROM sys.databases a 
+WHERE name NOT IN ('Tempdb', 'master') 
+  
+  
+--Loop tru all user databases and MSDB 
+WHILE(EXISTS(SELECT TOP 1 1 FROM DatabasesForDowngrade WHERE Stat = 0)) 
+BEGIN 
+  SET @DatabaseName = (SELECT TOP 1 DatabaseName FROM DatabasesForDowngrade WHERE Stat = 0) 
+  
+  --Save file locations at table 
+  SET @Sql =  
+  'INSERT INTO master.dbo.DatabasesForDowngrade 
+  SELECT 
+    ''' + @DatabaseName + ''', 
+    physical_name, 
+    0 
+  FROM ' + @DatabaseName + '.sys.database_files' 
+ 
+  EXEC (@Sql) 
+  
+  --Generate full backups 
+  SET @Sql =  
+  'BACKUP DATABASE ' + @DatabaseName + ' TO  DISK = N''' + @FolderLocation + '\' + @DatabaseName + '.bak'' 
+  WITH  COPY_ONLY, NOFORMAT, NOINIT,  NAME = N''' + @DatabaseName + '-Full Database Backup'',  
+  SKIP, NOREWIND, NOUNLOAD,  STATS = 1' 
+  
+  EXEC (@Sql) 
+  
+  ----Execute detach 
+  --SET @Sql = 
+  --'ALTER DATABASE ' + @DatabaseName + ' SET SINGLE_USER WITH ROLLBACK IMMEDIATE 
+  --EXEC master.dbo.sp_detach_db @dbname = N''' + @DatabaseName + ''', @skipchecks = ''false''' 
+  --IF(@DatabaseName NOT IN ('MSDB', 'TEMPDB', 'master', 'Model')) 
+  --  EXEC (@Sql) 
+  
+  --Update controls 
+  UPDATE DatabasesForDowngrade 
+  SET Stat = 1 
+  WHERE DatabaseName LIKE @DatabaseName 
+  
+  SET @DatabaseName = '' 
+  SET @Sql = '' 
+END 
+  
+  
+----Generate file at the newly created folder with that information 
+--SELECT * FROM DatabasesForDowngrade 
+--SET @Sql = 'sqlcmd -Q "SELECT LTRIM(RTRIM(DatabaseName + ''|'' + Files)) FROM master.dbo.DatabasesForDowngrade WHERE Files IS NOT NULL" -o ' + @FolderLocation + '\PhysicalFiles.txt' 
+--EXEC xp_cmdshell @Sql 
+  
+  
+--Disnable xp_cmdshell 
+EXEC sp_configure 'show advanced options', 1 
+GO 
+RECONFIGURE 
+GO 
+EXEC sp_configure 'xp_cmdshell', 0 
+GO 
+RECONFIGURE 
+GO 
+CREATE LOGINS:
+USE [master]
+GO
+IF OBJECT_ID('dbo.sp_hexadecimal') IS NOT NULL
+    DROP PROCEDURE dbo.sp_hexadecimal
+GO
+CREATE PROCEDURE dbo.sp_hexadecimal
+    @binvalue [varbinary](256)
+    ,@hexvalue [nvarchar] (514) OUTPUT
+AS
+BEGIN
+    DECLARE @i [smallint]
+    DECLARE @length [smallint]
+    DECLARE @hexstring [nchar](16)
+    SELECT @hexvalue = N'0x'
+    SELECT @i = 1
+    SELECT @length = DATALENGTH(@binvalue)
+    SELECT @hexstring = N'0123456789ABCDEF'
+    WHILE (@i < =  @length)
+    BEGIN
+        DECLARE @tempint   [smallint]
+        DECLARE @firstint  [smallint]
+        DECLARE @secondint [smallint]
+        SELECT @tempint = CONVERT([smallint], SUBSTRING(@binvalue, @i, 1))
+        SELECT @firstint = FLOOR(@tempint / 16)
+        SELECT @secondint = @tempint - (@firstint * 16)
+        SELECT @hexvalue = @hexvalue
+            + SUBSTRING(@hexstring, @firstint  + 1, 1)
+            + SUBSTRING(@hexstring, @secondint + 1, 1)
+        SELECT @i = @i + 1
+    END
+END
+GO
+IF OBJECT_ID('dbo.sp_help_revlogin') IS NOT NULL
+    DROP PROCEDURE dbo.sp_help_revlogin
+GO
+CREATE PROCEDURE dbo.sp_help_revlogin
+    @login_name [sysname] = NULL
+AS
+BEGIN
+    DECLARE @name                  [sysname]
+    DECLARE @type                  [nvarchar](1)
+    DECLARE @hasaccess             [int]
+    DECLARE @denylogin             [int]
+    DECLARE @is_disabled           [int]
+    DECLARE @PWD_varbinary         [varbinary](256)
+    DECLARE @PWD_string            [nvarchar](514)
+    DECLARE @SID_varbinary         [varbinary](85)
+    DECLARE @SID_string            [nvarchar](514)
+    DECLARE @tmpstr                [nvarchar](4000)
+    DECLARE @is_policy_checked     [nvarchar](3)
+    DECLARE @is_expiration_checked [nvarchar](3)
+    DECLARE @Prefix                [nvarchar](4000)
+    DECLARE @defaultdb             [sysname]
+    DECLARE @defaultlanguage       [sysname]
+    DECLARE @tmpstrRole            [nvarchar](4000)
+    IF @login_name IS NULL
+    BEGIN
+        DECLARE login_curs CURSOR
+        FOR
+        SELECT p.[sid],p.[name],p.[type],p.is_disabled,p.default_database_name,l.hasaccess,l.denylogin,default_language_name = ISNULL(p.default_language_name,@@LANGUAGE)
+        FROM sys.server_principals p
+        LEFT JOIN sys.syslogins l ON l.[name] = p.[name]
+        WHERE p.[type] IN ('S' /* SQL_LOGIN */,'G' /* WINDOWS_GROUP */,'U' /* WINDOWS_LOGIN */)
+            AND p.[name] <> 'sa'
+            AND p.[name] not like '##%'
+        ORDER BY p.[name]
+    END
+    ELSE
+        DECLARE login_curs CURSOR
+        FOR
+        SELECT p.[sid],p.[name],p.[type],p.is_disabled,p.default_database_name,l.hasaccess,l.denylogin,default_language_name = ISNULL(p.default_language_name,@@LANGUAGE)
+        FROM sys.server_principals p
+        LEFT JOIN sys.syslogins l ON l.[name] = p.[name]
+        WHERE p.[type] IN ('S' /* SQL_LOGIN */,'G' /* WINDOWS_GROUP */,'U' /* WINDOWS_LOGIN */)
+            AND p.[name] <> 'sa'
+            AND p.[name] NOT LIKE '##%'
+            AND p.[name] = @login_name
+        ORDER BY p.[name]
+    OPEN login_curs
+    FETCH NEXT FROM login_curs INTO @SID_varbinary,@name,@type,@is_disabled,@defaultdb,@hasaccess,@denylogin,@defaultlanguage
+    IF (@@fetch_status = - 1)
+    BEGIN
+        PRINT '/* No login(s) found for ' + QUOTENAME(@login_name) + N'. */'
+        CLOSE login_curs
+        DEALLOCATE login_curs
+        RETURN - 1
+    END
+    SET @tmpstr = N'/* sp_help_revlogin script
+** Generated ' + CONVERT([nvarchar], GETDATE()) + N' on ' + @@SERVERNAME + N'
+*/'
+    PRINT @tmpstr
+    WHILE (@@fetch_status <> - 1)
+    BEGIN
+        IF (@@fetch_status <> - 2)
+        BEGIN
+            PRINT ''
+            SET @tmpstr = N'/* Login ' + QUOTENAME(@name) + N' */'
+            PRINT @tmpstr
+            SET @tmpstr = N'IF NOT EXISTS (
+    SELECT 1
+    FROM sys.server_principals
+    WHERE [name] = N''' + @name + N'''
+    )
+BEGIN'
+            PRINT @tmpstr
+            IF @type IN ('G','U') -- NT-authenticated Group/User
+            BEGIN -- NT authenticated account/group 
+                SET @tmpstr = N'    CREATE LOGIN ' + QUOTENAME(@name) + N'
+    FROM WINDOWS
+    WITH DEFAULT_DATABASE = ' + QUOTENAME(@defaultdb) + N'
+        ,DEFAULT_LANGUAGE = ' + QUOTENAME(@defaultlanguage)
+            END
+            ELSE
+            BEGIN -- SQL Server authentication
+                -- obtain password and sid
+                SET @PWD_varbinary = CAST(LOGINPROPERTY(@name, 'PasswordHash') AS [varbinary](256))
+                EXEC dbo.sp_hexadecimal @PWD_varbinary, @PWD_string OUT
+                EXEC dbo.sp_hexadecimal @SID_varbinary, @SID_string OUT
+                -- obtain password policy state
+                SELECT @is_policy_checked = CASE is_policy_checked WHEN 1 THEN 'ON' WHEN 0 THEN 'OFF' ELSE NULL END
+                FROM sys.sql_logins
+                WHERE [name] = @name
+ 
+                SELECT @is_expiration_checked = CASE is_expiration_checked WHEN 1 THEN 'ON' WHEN 0 THEN 'OFF' ELSE NULL END
+                FROM sys.sql_logins
+                WHERE [name] = @name
+ 
+                SET @tmpstr = NCHAR(9) + N'CREATE LOGIN ' + QUOTENAME(@name) + N'
+    WITH PASSWORD = ' + @PWD_string + N' HASHED
+        ,SID = ' + @SID_string + N'
+        ,DEFAULT_DATABASE = ' + QUOTENAME(@defaultdb) + N'
+        ,DEFAULT_LANGUAGE = ' + QUOTENAME(@defaultlanguage)
+ 
+                IF @is_policy_checked IS NOT NULL
+                BEGIN
+                    SET @tmpstr = @tmpstr + N'
+        ,CHECK_POLICY = ' + @is_policy_checked
+                END
+ 
+                IF @is_expiration_checked IS NOT NULL
+                BEGIN
+                    SET @tmpstr = @tmpstr + N'
+        ,CHECK_EXPIRATION = ' + @is_expiration_checked
+                END
+            END
+            IF (@denylogin = 1)
+            BEGIN -- login is denied access
+                SET @tmpstr = @tmpstr
+                    + NCHAR(13) + NCHAR(10) + NCHAR(9) + N''
+                    + NCHAR(13) + NCHAR(10) + NCHAR(9) + N'DENY CONNECT SQL TO ' + QUOTENAME(@name)
+            END
+            ELSE IF (@hasaccess = 0)
+            BEGIN -- login exists but does not have access
+                SET @tmpstr = @tmpstr
+                    + NCHAR(13) + NCHAR(10) + NCHAR(9) + N''
+                    + NCHAR(13) + NCHAR(10) + NCHAR(9) + N'REVOKE CONNECT SQL TO ' + QUOTENAME(@name)
+            END
+            IF (@is_disabled = 1)
+            BEGIN -- login is disabled
+                SET @tmpstr = @tmpstr
+                    + NCHAR(13) + NCHAR(10) + NCHAR(9) + N''
+                    + NCHAR(13) + NCHAR(10) + NCHAR(9) + N'ALTER LOGIN ' + QUOTENAME(@name) + N' DISABLE'
+            END
+            SET @Prefix =
+                NCHAR(13) + NCHAR(10) + NCHAR(9) + N''
+                + NCHAR(13) + NCHAR(10) + NCHAR(9) + N'EXEC [master].dbo.sp_addsrvrolemember @loginame = N'''
+            SET @tmpstrRole = N''
+            SELECT @tmpstrRole = @tmpstrRole
+                + CASE WHEN sysadmin = 1 THEN @Prefix + LoginName + N''', @rolename = N''sysadmin''' ELSE '' END
+                + CASE WHEN securityadmin = 1 THEN @Prefix + LoginName + N''', @rolename = N''securityadmin''' ELSE '' END
+                + CASE WHEN serveradmin = 1 THEN @Prefix + LoginName + N''', @rolename = N''serveradmin''' ELSE '' END
+                + CASE WHEN setupadmin = 1 THEN @Prefix + LoginName + N''', @rolename = N''setupadmin''' ELSE '' END
+                + CASE WHEN processadmin = 1 THEN @Prefix + LoginName + N''', @rolename = N''processadmin''' ELSE '' END
+                + CASE WHEN diskadmin = 1 THEN @Prefix + LoginName + N''', @rolename = N''diskadmin''' ELSE '' END
+                + CASE WHEN dbcreator = 1 THEN @Prefix + LoginName + N''', @rolename = N''dbcreator''' ELSE '' END
+                + CASE WHEN bulkadmin = 1 THEN @Prefix + LoginName + N''', @rolename = N''bulkadmin''' ELSE '' END
+            FROM (
+                SELECT
+                    SUSER_SNAME([sid])AS LoginName
+                    ,sysadmin
+                    ,securityadmin
+                    ,serveradmin
+                    ,setupadmin
+                    ,processadmin
+                    ,diskadmin
+                    ,dbcreator
+                    ,bulkadmin
+                FROM sys.syslogins
+                WHERE (    sysadmin <> 0
+                        OR securityadmin <> 0
+                        OR serveradmin <> 0
+                        OR setupadmin <> 0
+                        OR processadmin <> 0
+                        OR diskadmin <> 0
+                        OR dbcreator <> 0
+                        OR bulkadmin <> 0
+                        )
+                    AND [name] = @name
+                ) L
+            IF @tmpstr <> '' PRINT @tmpstr
+            IF @tmpstrRole <> '' PRINT @tmpstrRole
+            PRINT 'END'
+        END
+        FETCH NEXT FROM login_curs INTO @SID_varbinary,@name,@type,@is_disabled,@defaultdb,@hasaccess,@denylogin,@defaultlanguage
+    END
+    CLOSE login_curs
+    DEALLOCATE login_curs
+    RETURN 0
+END
+ 
+EXEC sp_configure 'show advanced options', 1
+GO
+-- To update the currently configured value for advanced options.
+RECONFIGURE
+GO
+-- To enable the feature.
+EXEC sp_configure 'xp_cmdshell', 1
+GO
+-- To update the currently configured value for this feature.
+RECONFIGURE
+GO
+ 
+DECLARE @sqlCommand NVARCHAR(4000);
+ 
+SET @sqlCommand = 'sqlcmd -Q "EXEC sp_help_revlogin" -o "I:\EditionUpgradeBackup\Create_Logins.sql"';
+ 
+EXEC xp_cmdshell @sqlCommand;
+
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++JOBS SCRIPTOUT:
+Job Scripting 
+Click on job -> open view -> object explorer details-> click on jobs 
+(open all the jobs and select all) click on -> script job as-> create to -> file and give path (I drive ) 
+
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++REPORTING SERVICES:
+GO TO reporting configuration services> encrypt key>backup> location path> password>
+
+
+++++++++++++++++++++++++++++++++++++++++++++++++++LINKED SERVERS:
+Script out linked servers_> views>object view> select all> script new>path with name
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++DETACH DATABASES:
+STEP : 4 DETACH DB'S AFTER SCRIPTING OUT JOBS
+ 
+--Script 01: 
+--Enable xp_cmdshell 
+EXEC sp_configure 'show advanced options', 1 
+GO 
+RECONFIGURE 
+GO 
+EXEC sp_configure 'xp_cmdshell', 1 
+GO 
+RECONFIGURE 
+GO 
+  
+--Global variables 
+DECLARE @FolderLocation VARCHAR(8000) 
+SET @FolderLocation  = 'I:\EditionUpgradeBackup' 
+  
+DECLARE @DatabaseName VARCHAR(8000) 
+SET @DatabaseName = '' 
+  
+DECLARE @Sql VARCHAR(8000) 
+SET @Sql = '' 
+  
+--Create backup folder 
+IF((SELECT @@SERVERNAME) LIKE 'AWS%' OR (SELECT @@SERVERNAME) LIKE 'AZR%') 
+  SET @Sql = 'mkdir ' + @FolderLocation 
+  EXEC xp_cmdshell @Sql 
+  
+--Create table with all databases 
+USE master 
+IF(EXISTS(SELECT TOP 1 1 FROM sys.tables WHERE name LIKE 'DatabasesForDowngrade')) 
+  DROP TABLE DatabasesForDowngrade 
+  
+CREATE TABLE DatabasesForDowngrade 
+( 
+  DatabaseName VARCHAR(8000), 
+  Files VARCHAR(8000) DEFAULT NULL, 
+  Stat INT DEFAULT 0 
+) 
+  
+INSERT INTO DatabasesForDowngrade(DatabaseName) 
+SELECT 
+  a.Name 
+FROM sys.databases a 
+WHERE name NOT IN ('Tempdb', 'master', 'msdb', 'model') 
+  
+  
+--Loop tru all user databases and MSDB 
+WHILE(EXISTS(SELECT TOP 1 1 FROM DatabasesForDowngrade WHERE Stat = 0)) 
+BEGIN 
+  SET @DatabaseName = (SELECT TOP 1 DatabaseName FROM DatabasesForDowngrade WHERE Stat = 0) 
+  
+  --Save file locations at table 
+  SET @Sql =  
+  'INSERT INTO master.dbo.DatabasesForDowngrade 
+  SELECT 
+    ''' + @DatabaseName + ''', 
+    physical_name, 
+    0 
+  FROM ' + @DatabaseName + '.sys.database_files' 
+ 
+  EXEC (@Sql) 
+  
+  ----Generate full backups 
+  --SET @Sql =  
+  --'BACKUP DATABASE ' + @DatabaseName + ' TO  DISK = N''' + @FolderLocation + '\' + @DatabaseName + '.bak'' 
+  --WITH  COPY_ONLY, NOFORMAT, NOINIT,  NAME = N''' + @DatabaseName + '-Full Database Backup'',  
+  --SKIP, NOREWIND, NOUNLOAD,  STATS = 1' 
+  
+  EXEC (@Sql) 
+  
+  --Execute detach 
+  SET @Sql = 
+  'ALTER DATABASE ' + @DatabaseName + ' SET SINGLE_USER WITH ROLLBACK IMMEDIATE 
+  EXEC master.dbo.sp_detach_db @dbname = N''' + @DatabaseName + ''', @skipchecks = ''false''' 
+  IF(@DatabaseName NOT IN ('MSDB', 'TEMPDB', 'master', 'Model')) 
+    EXEC (@Sql) 
+  
+  --Update controls 
+  UPDATE DatabasesForDowngrade 
+  SET Stat = 1 
+  WHERE DatabaseName LIKE @DatabaseName 
+  
+  SET @DatabaseName = '' 
+  SET @Sql = '' 
+END 
+  
+  
+----Generate file at the newly created folder with that information 
+--SELECT * FROM DatabasesForDowngrade 
+--SET @Sql = 'sqlcmd -Q "SELECT LTRIM(RTRIM(DatabaseName + ''|'' + Files)) FROM master.dbo.DatabasesForDowngrade WHERE Files IS NOT NULL" -o ' + @FolderLocation + '\PhysicalFiles.txt' 
+--EXEC xp_cmdshell @Sql 
+  
+  
+--Disnable xp_cmdshell 
+EXEC sp_configure 'show advanced options', 1 
+GO 
+RECONFIGURE 
+GO 
+EXEC sp_configure 'xp_cmdshell', 0 
+GO 
+RECONFIGURE 
+GO 
+++++++++++++++++++++++++++++++++++++++++++++++TAKE FILE LOCATION FROM SHARED PATH THEN INSTALL SQL SERVERS.
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++Post installation step/+++++++++++++++++++++++++++++++++++++
+/**********************************************************************************************
+
+Script Name: SQL_Post_Installation
+
+Description: SQL Script to customize SQL Server installation for SDDC
+
+**********************************************************************************************/
+USE master
+
+GO
+
+sp_configure 'show advanced options', 1;
+
+GO
+
+reconfigure
+
+GO
+
+/**********************************************/
+
+/*Enable Backup Compression*/
+
+USE master
+
+GO
+
+sp_configure 'backup compression default',1
+
+GO
+
+reconfigure
+
+GO
+
+/**********************************************/
+
+/*Configure to use 75% of Server Memory*/
+
+DECLARE @S_Mem INT
+
+SELECT @S_Mem = (SELECT total_physical_memory_kb/1024 FROM sys.dm_os_sys_memory) * 0.75
+
+BEGIN
+
+EXEC sp_configure 'max server memory (MB)',@S_Mem
+
+reconfigure
+
+END
+
+GO
+
+/**********************************************/
+
+/*Configure Remote Query Timeout*/
+
+sp_configure 'remote query timeout (s)',0
+
+GO
+
+reconfigure
+
+GO
+
+/**********************************************/
+
+/*Configure Remote admin connection*/
+
+sp_configure 'remote admin connections', 1
+
+GO
+
+reconfigure
+
+GO
+/**********************************************/
+
+/*Configure MAXDOP based on # of processors*/
+
+DECLARE @T_CPU INT
+
+DECLARE @S_CPU INT
+
+SELECT @T_CPU = (SELECT cpu_count FROM sys.dm_os_sys_info)
+ 
+IF @T_CPU > 4
+
+BEGIN
+
+  SET @S_CPU = @T_CPU / 2
+
+  IF @S_CPU <= 8
+
+    EXEC sp_configure 'max degree of parallelism', @S_CPU
+
+  ELSE
+
+    EXEC sp_configure 'max degree of parallelism', 8
+
+END
+ELSE
+
+IF @T_CPU < 4
+
+BEGIN
+
+  SET @S_CPU = @T_CPU
+
+  IF @S_CPU <= 4
+
+    EXEC sp_configure 'max degree of parallelism', @S_CPU
+
+END
+ 
+/*Configure xp_cmdshell*/
+
+USE master
+
+GO
+
+sp_configure 'xp_cmdshell',1
+
+GO
+
+reconfigure
+
+GO
+
+/**********************************************/
+EXEC xp_instance_regwrite N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'LoginMode', REG_DWORD, 2;
+ 
+/**********************************************/
+ 
+/*Configure Error Log to 45 files*/
+
+EXEC master.sys.xp_instance_regwrite
+
+    N'HKEY_LOCAL_MACHINE',
+
+    N'Software\Microsoft\MSSQLServer\MSSQLServer',
+
+    N'NumErrorLogs',
+
+  N'REG_DWORD',
+
+    45
+
+GO
+
+/**********************************************/
+DECLARE @serverName NVARCHAR(50) = @@SERVERNAME
+IF @serverName LIKE '%azr%' OR @serverName LIKE '%aws%'
+
+BEGIN
+
+    USE [master]
+
+    EXEC xp_instance_regwrite
+
+        N'HKEY_LOCAL_MACHINE',
+
+        N'Software\Microsoft\MSSQLServer\MSSQLServer',
+
+        N'BackupDirectory',
+
+        REG_SZ,
+
+        N'I:\SQLBackup'
+
+END
+/**********************************************/
+USE [master]
+EXEC xp_instance_regwrite N'HKEY_LOCAL_MACHINE', N'Software\Microsoft\MSSQLServer\MSSQLServer', N'LoginMode', REG_DWORD, 2
+ 
+/**********************************************/
+
+/*Configure TempDB Data and LogFiles*/
+
+DECLARE @TDB_Size_Source INT,@TDB_Size INT,@STDB_Size INT, @CMD NVARCHAR(4000), @CMD_2 NVARCHAR(4000), @CMD_3 NVARCHAR(4000), @i INT, @Loc VARCHAR(1000), @T_CPU INT
+
+SELECT @Loc = (SELECT SUBSTRING(physical_name,0,CHARINDEX('\tempdb.mdf',physical_name)+1) FROM sys.master_files WHERE DB_NAME(database_id) = 'tempdb' AND file_id = 1)
+
+SELECT @TDB_Size_Source = (SELECT
+
+            (((total_bytes/1024)/1024)/1024)
+
+          FROM
+
+            sys.master_files AS f
+
+            CROSS APPLY sys.dm_os_volume_stats(f.database_id, f.file_id)
+
+          WHERE
+
+            DB_NAME(f.database_id) = 'tempdb'
+
+            AND f.file_id = 1)
+
+SELECT @T_CPU = (SELECT cpu_count FROM sys.dm_os_sys_info)
+
+IF @TDB_Size_Source < 10
+
+BEGIN
+
+SELECT @TDB_Size = (SELECT
+
+            (total_bytes/1024)/1024
+
+          FROM
+
+            sys.master_files AS f
+
+            CROSS APPLY sys.dm_os_volume_stats(f.database_id, f.file_id)
+
+          WHERE
+
+            DB_NAME(f.database_id) = 'tempdb'
+
+            AND f.file_id = 1)
+
+SET @STDB_Size = @TDB_Size * 0.10
+IF @T_CPU = 1
+
+BEGIN
+  SET @CMD = '
+
+  ALTER DATABASE tempdb
+
+  MODIFY FILE
+
+  (
+
+    NAME = tempdev,
+
+    SIZE = '+ CONVERT(varchar,@STDB_Size)+'MB,
+
+    MAXSIZE = UNLIMITED,
+
+    FILEGROWTH = 2GB
+
+  )'
+
+  EXEC sp_executesql @CMD
+
+END
+
+IF (@T_CPU > 1) AND (@T_CPU <= 8)
+
+BEGIN
+
+  SET @CMD = '
+
+  ALTER DATABASE tempdb
+
+  MODIFY FILE
+
+  (
+
+    NAME = tempdev,
+
+    SIZE = '+ CONVERT(varchar,@STDB_Size)+'MB,
+
+    MAXSIZE = UNLIMITED,
+
+    FILEGROWTH = 2GB
+
+  )'
+
+  EXEC sp_executesql @CMD
+
+  SET @i = 2
+
+  WHILE @i <= @T_CPU
+
+  BEGIN
+
+    SET @CMD_2 = '
+
+    ALTER DATABASE tempdb
+
+    ADD FILE
+
+    (
+
+      NAME = tempdev_' + CONVERT(VARCHAR,@i) + ',
+
+      FILENAME = ''' + @Loc + 'tempdb_'+ CONVERT(VARCHAR,@i) + ''',
+
+      SIZE = '+ CONVERT(varchar,@STDB_Size)+'MB,
+
+      MAXSIZE = UNLIMITED,
+
+      FILEGROWTH = 2GB
+
+    )'
+
+    EXEC sp_executesql @CMD_2
+
+    SET @i = @i + 1
+
+  END
+
+END
+
+IF (@T_CPU > 8)
+
+BEGIN
+
+  SET @CMD = '
+
+  ALTER DATABASE tempdb
+
+  MODIFY FILE
+
+  (
+
+    NAME = tempdev,
+
+    SIZE = '+ CONVERT(varchar,@STDB_Size)+'MB,
+
+    MAXSIZE = UNLIMITED,
+
+    FILEGROWTH = 2GB
+
+  )'
+
+  EXEC sp_executesql @CMD
+
+  SET @i = 2
+
+  WHILE @i <= 8
+
+  BEGIN
+
+    SET @CMD_2 = '
+
+    ALTER DATABASE tempdb
+
+    ADD FILE
+
+    (
+
+      NAME = tempdev_' + CONVERT(VARCHAR,@i) + ',
+
+      FILENAME = ''' + @Loc + 'tempdb_'+ CONVERT(VARCHAR,@i) + '.ndf'',
+
+      SIZE = '+ CONVERT(varchar,@STDB_Size)+'MB,
+
+      MAXSIZE = UNLIMITED,
+
+      FILEGROWTH = 2GB
+
+    )'
+
+    EXEC sp_executesql @CMD_2
+
+    SET @i = @i + 1
+
+  END
+
+END
+SET @CMD_3 = '
+
+ALTER DATABASE tempdb
+
+MODIFY FILE
+
+(
+
+  NAME = templog,
+
+  SIZE = '+ CONVERT(varchar,@STDB_Size)+'MB,
+
+  MAXSIZE = UNLIMITED,
+
+  FILEGROWTH = 1GB
+
+)'
+
+EXEC sp_executesql @CMD_3
+
+END
+
+IF @TDB_Size_Source >= 10
+
+BEGIN
+
+SELECT @TDB_Size = (SELECT
+
+            ((total_bytes/1024)/1024)/1024
+
+          FROM
+
+            sys.master_files AS f
+
+            CROSS APPLY sys.dm_os_volume_stats(f.database_id, f.file_id)
+
+          WHERE
+
+            DB_NAME(f.database_id) = 'tempdb'
+
+            AND f.file_id = 1)
+
+IF (@TDB_Size * 0.10) <= 10
+
+  SET @STDB_Size = @TDB_Size * 0.10
+
+ELSE
+
+  SET @STDB_Size = 10
+IF @T_CPU = 1
+
+BEGIN
+
+  SET @CMD = '
+
+  ALTER DATABASE tempdb
+
+  MODIFY FILE
+
+  (
+
+    NAME = tempdev,
+
+    SIZE = '+ CONVERT(varchar,@STDB_Size)+'GB,
+
+    MAXSIZE = UNLIMITED,
+
+    FILEGROWTH = 2GB
+
+  )'
+
+  print @CMD
+
+  EXEC sp_executesql @CMD
+
+END
+
+IF (@T_CPU > 1) AND (@T_CPU <= 8)
+
+BEGIN
+
+  SET @CMD = '
+
+  ALTER DATABASE tempdb
+
+  MODIFY FILE
+
+  (
+
+    NAME = tempdev,
+
+    SIZE = '+ CONVERT(varchar,@STDB_Size)+'GB,
+
+    MAXSIZE = UNLIMITED,
+
+    FILEGROWTH = 2GB
+
+  )'
+
+  EXEC sp_executesql @CMD
+
+  SET @i = 2
+
+  WHILE @i <= @T_CPU
+
+  BEGIN
+
+    SET @CMD_2 = '
+
+    ALTER DATABASE tempdb
+
+    ADD FILE
+
+    (
+
+      NAME = tempdev_' + CONVERT(VARCHAR,@i) + ',
+
+      FILENAME = ''' + @Loc + 'tempdb_'+ CONVERT(VARCHAR,@i) + '.ndf'',
+
+      SIZE = '+ CONVERT(varchar,@STDB_Size)+'GB,
+
+      MAXSIZE = UNLIMITED,
+
+      FILEGROWTH = 2GB
+
+    )'
+
+    EXEC sp_executesql @CMD_2
+
+    SET @i = @i + 1
+
+  END
+
+END
+
+IF (@T_CPU > 8)
+
+BEGIN
+
+  SET @CMD = '
+
+  ALTER DATABASE tempdb
+
+  MODIFY FILE
+
+  (
+
+    NAME = tempdev,
+
+    SIZE = '+ CONVERT(varchar,@STDB_Size)+'GB,
+
+    MAXSIZE = UNLIMITED,
+
+    FILEGROWTH = 2GB
+
+  )'
+
+  EXEC sp_executesql @CMD
+
+  SET @i = 2
+
+  WHILE @i <= 8
+
+  BEGIN
+
+    SET @CMD_2 = '
+
+    ALTER DATABASE tempdb
+
+    ADD FILE
+
+    (
+
+      NAME = tempdev_' + CONVERT(VARCHAR,@i) + ',
+
+      FILENAME = ''' + @Loc + 'tempdb_'+ CONVERT(VARCHAR,@i) + '.ndf'',
+
+      SIZE = '+ CONVERT(varchar,@STDB_Size)+'GB,
+
+      MAXSIZE = UNLIMITED,
+
+      FILEGROWTH = 2GB
+
+    )'
+
+    EXEC sp_executesql @CMD_2
+
+    SET @i = @i + 1
+
+  END
+
+END
+SET @CMD_3 = '
+
+ALTER DATABASE tempdb
+
+MODIFY FILE
+
+(
+
+  NAME = templog,
+
+  SIZE = '+ CONVERT(varchar,@STDB_Size)+'GB,
+
+  MAXSIZE = UNLIMITED,
+
+  FILEGROWTH = 1GB
+
+)'
+
+EXEC sp_executesql @CMD_3
+
+END
+/*********End TempDB*************************************/
+ 
+
+
+++++++++++++++++++++++++++++++++++++++++++++xp_cmdshelL+++CONFIGURATION+++++++++++++++++++++++++++++++++++++++++++++
+-- Enable advanced options
+EXEC sp_configure 'show advanced options', 1;
+RECONFIGURE;
+
+-- Enable xp_cmdshell
+EXEC sp_configure 'xp_cmdshell', 1;
+RECONFIGURE;
+++++++++++++++++++++++++++++++++++++++++++++++++RESTORE COMMAND DATABASES+++++++++++++++++++++++++++++++++++++++++++++
+	1. USE master  
+	RESTORE DATABASE [model] FROM DISK = N'I:\EditionUpgradeBackup\model.Bak' WITH REPLACE  
+GO 
+   2. SINGLE USER MODE 
+USE master; 
+GO 
+ALTER DATABASE msdb SET SINGLE_USER WITH ROLLBACK IMMEDIATE; 
+GO 
+	3. KILL SESSION 
+USE master 
+GO 
+DECLARE @kill varchar(max) = ''; 
+SELECT @kill = @kill + 'KILL ' + CONVERT(varchar(10), spid) + '; ' 
+FROM master..sysprocesses  
+WHERE spid > 50 AND dbid = DB_ID('db_name') 
+EXEC(@kill); 
+
+  
+	4. RESTORE DATABASE msdb FROM DISK = 'I:\EditionUpgradeBackup\msdb.Bak' WITH REPLACE; 
+GO 
+    5.  ALTER DATABASE msdb SET MULTI_USER; 
+GO 
+  
+ 
+-- Restore command here 
+-- Example: 
+-- RESTORE DATABASE msdb FROM DISK = 'C:\Backup\msdb.bak' WITH REPLACE; 
