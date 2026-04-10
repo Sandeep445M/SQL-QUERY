@@ -1,0 +1,227 @@
+sp_updatestats
+Sp_who2 active
+Event viewer--windows-application--mssql - general
+Control panel --programs-install programs
+select * from sys.sysprocesses where blocked > 0
+select * from sys.sysprocesses where spid = '156'
+select * from sys.sysprocesses where spid = '990'
+select * from sys.sysprocesses where spid = '1264'
+sp_updatestats  ----- for update the database --run on particular database 
+
+Registry editor 
+Percentage checking in backups
+select percent_complete,(estimated_completion_time/1000/60.) from sys.dm_exec_requests where command like '%backup%' 
+select * from sys.dm_exec_requests where command like '%backup%' 
+
+TOP 10 expensive queries high cpu type :
+SELECT TOP 10 
+    total_worker_time/1000 AS total_cpu_ms,
+    execution_count,
+    (total_worker_time/execution_count)/1000 AS avg_cpu_ms,
+    query_hash,
+    SUBSTRING(text, statement_start_offset / 2, 
+      (CASE WHEN statement_end_offset = -1 
+        THEN LEN(CONVERT(nvarchar(MAX), text)) * 2 
+        ELSE statement_end_offset 
+      END - statement_start_offset) / 2) AS query_text
+FROM sys.dm_exec_query_stats
+CROSS APPLY sys.dm_exec_sql_text(sql_handle)
+ORDER BY total_worker_time DESC;
+
+To find the root blocker
+SELECT 
+    r.session_id,
+    r.blocking_session_id,
+    r.wait_type,
+    r.wait_time,
+    DB_NAME(r.database_id) AS DatabaseName,
+    r.status,
+    r.command,
+    t.text AS QueryText
+FROM sys.dm_exec_requests r
+OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.session_id IN (
+    SELECT DISTINCT blocking_session_id  
+    FROM sys.dm_exec_requests  
+    WHERE blocking_session_id <> 0
+);
+
+
+To find the root blocker
+SELECT 
+    r.session_id AS RootBlockerSPID,
+    r.status,
+    r.command,
+    r.wait_type,
+    r.wait_time,
+    r.blocking_session_id,
+    DB_NAME(r.database_id) AS DatabaseName,
+    s.host_name,
+    s.program_name,
+    s.login_name,
+    t.text AS QueryText
+FROM sys.dm_exec_requests r
+JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
+OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.session_id IN (
+    SELECT blocking_session_id 
+    FROM sys.dm_exec_requests 
+    WHERE blocking_session_id <> 0
+)
+AND r.session_id NOT IN (
+    SELECT session_id 
+    FROM sys.dm_exec_requests 
+    WHERE blocking_session_id <> 0
+);
+
+SELECT
+db.name DBName,
+tl.request_session_id,
+wt.blocking_session_id,
+OBJECT_NAME(p.OBJECT_ID) BlockedObjectName,
+tl.resource_type,
+h1.TEXT AS RequestingText,
+h2.TEXT AS BlockingTest,
+tl.request_mode
+FROM sys.dm_tran_locks AS tl
+INNER JOIN sys.databases db ON db.database_id = tl.resource_database_id
+INNER JOIN sys.dm_os_waiting_tasks AS wt ON tl.lock_owner_address =wt.resource_address
+INNER JOIN sys.partitions AS p ON p.hobt_id =tl.resource_associated_entity_id
+INNER JOIN sys.dm_exec_connections ec1 ON ec1.session_id =tl.request_session_id
+INNER JOIN sys.dm_exec_connections ec2 ON ec2.session_id =wt.blocking_session_id
+CROSS APPLY sys.dm_exec_sql_text(ec1.most_recent_sql_handle) AS h1
+CROSS APPLY sys.dm_exec_sql_text(ec2.most_recent_sql_handle) AS h2
+GO
+
+-- Identify the root blocking session(s)
+SELECT 
+    r.session_id AS RootBlockerSPID,
+    r.status,
+    r.command,
+    r.wait_type,
+    r.wait_time,
+    r.blocking_session_id,
+    DB_NAME(r.database_id) AS DatabaseName,
+    s.host_name,
+    s.program_name,
+    s.login_name,
+    t.text AS QueryText
+FROM sys.dm_exec_requests r
+JOIN sys.dm_exec_sessions s ON r.session_id = s.session_id
+OUTER APPLY sys.dm_exec_sql_text(r.sql_handle) t
+WHERE r.session_id IN (
+    SELECT blocking_session_id 
+    FROM sys.dm_exec_requests 
+    WHERE blocking_session_id <> 0
+)
+AND r.session_id NOT IN (
+    SELECT session_id 
+    FROM sys.dm_exec_requests 
+    WHERE blocking_session_id <> 0
+);
+
+
+
+
+
+Checking blockings which session id is blocking
+SELECT * FROM sys.dm_os_waiting_tasks
+WHERE blocking_session_id IS NOT NULL
+GO
+
+Alter database name before we should run this query then change the database name directly 
+alter database POWADB005_W set single_user with rollback immediate 
+go 
+alter database POWADB005_W set multi_user 
+
+
+Possibility check for log fie shrink -check point trigger- ther is no free space at shrink place in database shirking. USE [msdb]
+Right click on database-> task->shrink->files->log
+Check free space availability before shrink and get script. If percentage is zero then check 
+SELECT name,log_reuse_wait_desc FROM sys.databases;
+And goto that database if take log backup(trigger log backup job) then check point will trigger now we will get some free space.  
+
+BACKUP_COPY ONLY:
+backup database Baseline
+to disk = 'I:\REQ000000334072\Baseline_full_Copyonly_29042025.BAK' WITH COPY_ONLY, COMPRESSION
+backup database POWADB004_7may
+to disk = 'I:\RITM000000358679\POWADB004_7may_full_Copyonly_30052025.BAK' WITH COPY_ONLY, COMPRESSION, stats=5
+
+
+
+Error log:
+EXEC sp_readerrorlog
+
+
+SELECT TOP 5 backups  
+    database_name,  
+    physical_device_name AS backup_location,  
+    backup_start_date,  
+    backup_finish_date  
+FROM msdb.dbo.backupset bs  
+JOIN msdb.dbo.backupmediafamily bmf  
+    ON bs.media_set_id = bmf.media_set_id  
+WHERE bs.type = 'D'  -- 'D' stands for Full Backup  
+ORDER BY backup_start_date DESC;
+
+
+
+Database space 
+select database_id as databaseID, '##'+name+'##' as databaseNmae from sys.databases
+
+
+
+This query retrieves:
+	• The SQL Server instance name.
+	• The total number of databases.
+	• The number of databases that are online.
+	• The number of databases that allow multiple users.
+	• The SQL Server startup time.
+	• The current timestamp when the query is executed.
+
+
+SELECT 
+    @@SERVERNAME AS server_Name, 
+    (SELECT COUNT(1) FROM sys.databases) AS total_databases, 
+    (SELECT COUNT(1) FROM sys.databases WHERE state_desc = 'ONLINE') AS Online_databases, 
+    (SELECT COUNT(1) FROM sys.databases WHERE user_access_desc = 'MULTI_USER') AS Multi_user_databases, 
+    (SELECT sqlserver_start_time FROM sys.dm_os_sys_info) AS sql_startup_time, 
+    GETDATE() AS query_timestamp;
+
+
+
+
+
+
+
+Sql server start time or restart time we can check in temp db properties created date (because tem db create ever restart of server)
+Or we can run this query
+SELECT sqlServer_start_time as lastRestarttime
+FROM sys.dm_os_sys_info;
+
+
+WHEN THE BACKUPS ARE RUN 
+SELECT 
+    bs.database_name,
+    bs.backup_start_date,
+    bs.backup_finish_date,
+    CASE 
+        WHEN bs.type = 'D' THEN 'Full Backup'
+        WHEN bs.type = 'I' THEN 'Differential Backup'
+        WHEN bs.type = 'L' THEN 'Transaction Log Backup'
+        ELSE 'Other Backup Type'
+    END AS backup_type,
+    bs.backup_size / 1024 / 1024 AS backup_size_MB,
+    bmf.physical_device_name
+FROM msdb.dbo.backupset AS bs
+JOIN msdb.dbo.backupmediafamily AS bmf
+ON bs.media_set_id = bmf.media_set_id
+ORDER BY bs.backup_start_date DESC;
+
+CPU USAGE
+select * from sys.dm_os_wait_stats
+where wait_type like '%cpu%';
+select runnable_tasks_count from sys.dm_os_schedulers
+where status = 'visible online';
+
+
