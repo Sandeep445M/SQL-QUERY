@@ -1,0 +1,7 @@
+SELECT *
+
+FROM msdb.dbo.ITS_BACKUP_JOB
+
+WHERE BackupType = 'TAPE_FULL'
+
+ORDER BY TapeBkpStartTime DESC
